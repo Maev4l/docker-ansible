@@ -1,0 +1,94 @@
+---
+- hosts: example_aws
+  tasks:
+    - name: Install system packages
+      become: yes
+      become_method: sudo
+      apt:
+        name:
+          [
+            "apt-transport-https",
+            "ca-certificates",
+            "curl",
+            "gnupg2",
+            "software-properties-common",
+            "python3-distutils",
+          ]
+        update_cache: yes
+
+    - name: Add Docker GPG key
+      become: yes
+      become_method: sudo
+      apt_key: url=https://download.docker.com/linux/ubuntu/gpg
+
+    - name: Add Docker APT repository
+      become: yes
+      become_method: sudo
+      apt_repository:
+        repo: deb [arch=amd64] https://download.docker.com/linux/{{ansible_distribution|lower}} {{ansible_distribution_release}} stable
+
+    - name: Install Docker
+      become: yes
+      become_method: sudo
+      apt:
+        name: ["docker-ce", "docker-ce-cli", "containerd.io"]
+        update_cache: yes
+
+    - name: Configure Docker remote access (1)
+      become: yes
+      become_method: sudo
+      file:
+        path: /etc/systemd/system/docker.service.d
+        state: directory
+
+    - name: Configure Docker remote access (2)
+      become: yes
+      become_method: sudo
+      copy:
+        src: files/docker.options.conf
+        dest: /etc/systemd/system/docker.service.d/docker.options.conf
+
+    - name: Configure Docker remote access (3)
+      become: yes
+      become_method: sudo
+      systemd:
+        state: restarted
+        daemon_reload: yes
+        name: docker
+
+    - name: Download pip
+      get_url:
+        url: https://bootstrap.pypa.io/get-pip.py
+        dest: "/home/{{ ansible_user_id }}"
+
+    - name: Install pip
+      command: "python3 /home/{{ ansible_user_id }}/get-pip.py --user"
+
+    - name: Install Docker python SDK
+      #command: ".local/bin/pip install docker --user"
+      pip:
+        executable: "/home/{{ ansible_user_id }}/.local/bin/pip"
+        name: "docker"
+        extra_args: "--user"
+
+    - name: Create a container
+      docker_container:
+        name: mycontainer
+        image: postgres:10-alpine
+        docker_host: "{{inventory_hostname}}:2375"
+
+    - name: Add container to inventory
+      add_host:
+        name: mycontainer
+        ansible_connection: docker
+        ansible_docker_extra_args: "-H=tcp://{{inventory_hostname}}:2375"
+
+    - name: Install Python3 within container
+      delegate_to: mycontainer
+      raw: apk add python3
+
+    - name: Install curl within container
+      delegate_to: mycontainer
+      apk:
+        name: curl
+        update_cache: yes
